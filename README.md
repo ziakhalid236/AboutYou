@@ -67,6 +67,18 @@ The release build is signed with `keystore/aboutyou.jks`
 (alias `aboutyou`, store/key password `aboutyou123`). Replace this keystore
 before publishing to Google Play.
 
+## Continuous integration
+
+`.github/workflows/build-apk.yml` builds the app on GitHub:
+
+- runs on every push to `main`, on pull requests, and manually (Actions → *Build APK* → *Run workflow*);
+- runs the unit tests, then builds the debug and release APKs;
+- uploads both APKs as workflow artifacts (Actions → run → *Artifacts*);
+- on a push to `main`, attaches both APKs to a GitHub Release (`v1.0.<run-number>`).
+
+Download the latest APK from the
+[Releases page](https://github.com/ziakhalid236/AboutYou/releases).
+
 ## Project layout
 
 ```
