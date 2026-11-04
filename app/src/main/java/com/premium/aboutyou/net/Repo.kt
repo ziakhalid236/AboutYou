@@ -4,21 +4,20 @@ import com.premium.aboutyou.data.*
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.LocalDate
+import java.time.format.TextStyle
 import java.util.Locale
 
 /**
- * All live data comes from public, key-less, worldwide sources:
- *  - en.wikipedia.org  (search, summaries, article extracts)
- *  - api.wikimedia.org (Wikipedia "on this day" births, has an explicit year)
- *  - query.wikidata.org (exact date-of-birth search)
- *  - api.genderize.io / api.nationalize.io (name statistics)
+ * All live data comes from public, key-less, worldwide sources. Every request
+ * takes the chosen [Language], so the encyclopaedia text, the famous names and
+ * the birthday lists are returned in that language rather than translated
+ * afterwards:
+ *  - {lang}.wikipedia.org      (search, summaries, article extracts)
+ *  - api.wikimedia.org         (Wikipedia "on this day" births, has an explicit year)
+ *  - query.wikidata.org        (exact date-of-birth search)
+ *  - api.genderize.io / api.nationalize.io (name statistics, language independent)
  */
 object Repo {
-
-    private val DAY_MONTHS = listOf(
-        "January", "February", "March", "April", "May", "June",
-        "July", "August", "September", "October", "November", "December"
-    )
 
     private val COUNTRY_NAMES = mapOf(
         "TR" to "Turkey", "IR" to "Iran", "SA" to "Saudi Arabia", "EG" to "Egypt",
@@ -36,13 +35,15 @@ object Repo {
         "UA" to "Ukraine", "PT" to "Portugal", "GR" to "Greece", "CH" to "Switzerland"
     )
 
+    private fun api(lang: Language) = "https://${lang.wiki}.wikipedia.org"
+
     // ---------------------------------------------------------------- name info
 
-    fun fetchNameReport(rawName: String): NameReport {
+    fun fetchNameReport(rawName: String, lang: Language = Language.ENGLISH): NameReport {
         val query = rawName.trim()
         val stats = fetchNameStats(query)
-        val summary = fetchNameSummary(query)
-        val notable = fetchNotablePeople(query)
+        val summary = fetchNameSummary(query, lang)
+        val notable = fetchNotablePeople(query, lang)
         val local = LocalNameData.lookup(query)
         return NameReport(
             query = query,
@@ -54,12 +55,11 @@ object Repo {
     }
 
     /** Wikipedia page summary for the name itself (its history, origin and usage). */
-    private fun fetchNameSummary(name: String): WikiSummary? {
-        // Try "<Name> (given name)" first, then the plain title.
+    private fun fetchNameSummary(name: String, lang: Language): WikiSummary? {
         val candidates = listOf("$name (given name)", name)
         for (title in candidates) {
             val json = Http.get(
-                "https://en.wikipedia.org/api/rest_v1/page/summary/" + Http.enc(title.replace(' ', '_'))
+                "${api(lang)}/api/rest_v1/page/summary/" + Http.enc(title.replace(' ', '_'))
             ) ?: continue
             val obj = runCatching { JSONObject(json) }.getOrNull() ?: continue
             if (obj.optString("type") == "disambiguation") continue
@@ -77,9 +77,9 @@ object Repo {
     }
 
     /** Famous people who carry this given name. */
-    private fun fetchNotablePeople(name: String): List<NotablePerson> {
+    private fun fetchNotablePeople(name: String, lang: Language): List<NotablePerson> {
         val safe = name.replace("\"", "")
-        val url = "https://en.wikipedia.org/w/api.php?action=query&list=search" +
+        val url = "${api(lang)}/w/api.php?action=query&list=search" +
             "&srsearch=" + Http.enc("intitle:\"$safe\"") +
             "&srlimit=8&srnamespace=0&format=json&srprop=snippet"
         val json = Http.get(url) ?: return emptyList()
@@ -88,13 +88,13 @@ object Repo {
                 .let { arr -> (0 until arr.length()).map { arr.getJSONObject(it).optString("title") } }
         }.getOrDefault(emptyList())
         if (titles.isEmpty()) return emptyList()
-        return fetchPages(titles.take(6))
+        return fetchPages(titles.take(6), lang)
     }
 
     /** Batch fetch of intro extracts + thumbnails for a list of article titles. */
-    private fun fetchPages(titles: List<String>): List<NotablePerson> {
+    private fun fetchPages(titles: List<String>, lang: Language): List<NotablePerson> {
         if (titles.isEmpty()) return emptyList()
-        val url = "https://en.wikipedia.org/w/api.php?action=query&prop=extracts|pageimages|info" +
+        val url = "${api(lang)}/w/api.php?action=query&prop=extracts|pageimages|info" +
             "&inprop=url&exintro=1&explaintext=1&exsentences=2&exlimit=max" +
             "&pithumbsize=320&redirects=1&format=json&titles=" + Http.enc(titles.joinToString("|"))
         val json = Http.get(url) ?: return emptyList()
@@ -141,7 +141,12 @@ object Repo {
                 }
             }
             if (gj != null || countries.isNotEmpty()) {
-                result = NameStats(genderGuess = gj?.replaceFirstChar { it.uppercase() }, genderProbability = gp, avgAge = null, countries = countries)
+                result = NameStats(
+                    genderGuess = gj?.replaceFirstChar { it.uppercase() },
+                    genderProbability = gp,
+                    avgAge = null,
+                    countries = countries
+                )
             }
         }
         return result
@@ -150,11 +155,12 @@ object Repo {
     // ------------------------------------------------------- births on a date
 
     /** All people Wikipedia knows born on this month/day (any year). */
-    fun fetchBirthsOnDay(month: Int, day: Int): List<BirthEntry> {
+    fun fetchBirthsOnDay(month: Int, day: Int, lang: Language = Language.ENGLISH): List<BirthEntry> {
         val mm = "%02d".format(month)
         val dd = "%02d".format(day)
-        val json = Http.get("https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/births/$mm/$dd")
-            ?: return emptyList()
+        val json = Http.get(
+            "https://api.wikimedia.org/feed/v1/wikipedia/${lang.wiki}/onthisday/births/$mm/$dd"
+        ) ?: return emptyList()
         return runCatching {
             val arr = JSONObject(json).optJSONArray("births") ?: JSONArray()
             val out = ArrayList<BirthEntry>()
@@ -168,7 +174,7 @@ object Repo {
                 val thumb = page?.optJSONObject("thumbnail")?.optString("source")
                 val person = if (title.isNotBlank()) title.replace('_', ' ')
                 else text.substringBefore(",").trim()
-                val desc = text.substringAfter(",", "").trim().ifBlank { "Notable figure" }
+                val desc = text.substringAfter(",", "").trim()
                 val url = page?.optJSONObject("content_urls")?.optJSONObject("desktop")?.optString("page")
                 out.add(
                     BirthEntry(
@@ -187,7 +193,7 @@ object Repo {
     }
 
     /** People born on this exact calendar date (day + month + year) via Wikidata. */
-    fun fetchBirthsOnExactDate(date: LocalDate): List<BirthEntry> {
+    fun fetchBirthsOnExactDate(date: LocalDate, lang: Language = Language.ENGLISH): List<BirthEntry> {
         val next = date.plusDays(1)
         val from = "%04d-%02d-%02dT00:00:00Z".format(date.year, date.monthValue, date.dayOfMonth)
         val to = "%04d-%02d-%02dT00:00:00Z".format(next.year, next.monthValue, next.dayOfMonth)
@@ -195,7 +201,7 @@ object Repo {
             SELECT ?p ?dob ?article ?name ?image WHERE {
               ?p wdt:P569 ?dob .
               FILTER( ?dob >= "$from"^^xsd:dateTime && ?dob < "$to"^^xsd:dateTime )
-              ?article schema:about ?p ; schema:isPartOf <https://en.wikipedia.org/> ; schema:name ?name .
+              ?article schema:about ?p ; schema:isPartOf <https://${lang.wiki}.wikipedia.org/> ; schema:name ?name .
               OPTIONAL { ?p wdt:P18 ?image }
             } LIMIT 60
         """.trimIndent()
@@ -213,9 +219,9 @@ object Repo {
             out.add(
                 BirthEntry(
                     year = date.year,
-                    text = "$name (born ${date.year})",
+                    text = name,
                     personName = name,
-                    description = "Born on ${DAY_MONTHS[date.monthValue - 1]} ${date.dayOfMonth}, ${date.year}",
+                    description = "",
                     extract = "",
                     imageUrl = image,
                     pageUrl = article
@@ -238,12 +244,16 @@ object Repo {
     }
 
     /** Enriches a small list of entries with intro extracts (batched). */
-    fun enrichWithExtracts(entries: List<BirthEntry>, limit: Int = 8): List<BirthEntry> {
+    fun enrichWithExtracts(
+        entries: List<BirthEntry>,
+        lang: Language = Language.ENGLISH,
+        limit: Int = 8
+    ): List<BirthEntry> {
         val target = entries.take(limit)
         if (target.isEmpty()) return entries
         val titles = target.mapNotNull { it.pageUrl?.substringAfterLast('/')?.replace('_', ' ') }
         if (titles.isEmpty()) return entries
-        val url = "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&exintro=1&explaintext=1" +
+        val url = "${api(lang)}/w/api.php?action=query&prop=extracts&exintro=1&explaintext=1" +
             "&exsentences=2&exlimit=max&redirects=1&format=json&titles=" + Http.enc(titles.joinToString("|"))
         val json = Http.get(url) ?: return entries
         val map = runCatching {
@@ -262,5 +272,21 @@ object Repo {
         }
     }
 
-    fun monthName(m: Int): String = DAY_MONTHS.getOrElse(m - 1) { "" }
+    private fun locale(lang: Language) = Locale.forLanguageTag(lang.code)
+
+    /** "September 9" written in the chosen language. */
+    fun dayMonth(date: LocalDate, lang: Language): String {
+        val month = date.month.getDisplayName(TextStyle.FULL, locale(lang))
+        return "$month ${date.dayOfMonth}"
+    }
+
+    /** "9 September 2006" written in the chosen language. */
+    fun fullDate(date: LocalDate, lang: Language): String {
+        val month = date.month.getDisplayName(TextStyle.FULL, locale(lang))
+        return "${date.dayOfMonth} $month ${date.year}"
+    }
+
+    /** Weekday name written in the chosen language. */
+    fun weekday(date: LocalDate, lang: Language): String =
+        date.dayOfWeek.getDisplayName(TextStyle.FULL, locale(lang))
 }

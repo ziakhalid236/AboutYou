@@ -3,7 +3,6 @@ package com.premium.aboutyou.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -26,54 +25,63 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.premium.aboutyou.LoadState
 import com.premium.aboutyou.MainViewModel
+import com.premium.aboutyou.data.Dict
+import com.premium.aboutyou.data.Language
 import com.premium.aboutyou.data.LocalNameData
+import com.premium.aboutyou.data.NameMeaning
+import com.premium.aboutyou.data.NameReport
+import com.premium.aboutyou.data.Strings
 import com.premium.aboutyou.ui.components.*
 import com.premium.aboutyou.ui.theme.AppColors
 
 @Composable
-fun NameScreen(vm: MainViewModel, onBack: () -> Unit) {
+fun NameScreen(vm: MainViewModel, contentPadding: PaddingValues) {
     val state by vm.nameState.collectAsState()
+    val language by vm.language.collectAsState()
+    val strings = vm.strings
 
     AppBackground {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 20.dp)
+                .padding(contentPadding)
+                .padding(horizontal = 20.dp)
         ) {
+            Spacer(Modifier.height(18.dp))
             ScreenHeader(
-                title = "Name Insights",
+                title = strings.nameTitle,
                 subtitle = vm.lastSearchedName.ifBlank { null },
-                onBack = onBack
+                accent = AppColors.Gold
             )
             Spacer(Modifier.height(16.dp))
 
             when (val s = state) {
-                is LoadState.Loading -> LoadingBlock("Searching the web for this name…")
-                is LoadState.Idle -> EmptyBlock("Search a name from the home screen to see its meaning.")
+                is LoadState.Loading -> LoadingBlock(strings.searchingName)
+                is LoadState.Idle -> EmptyBlock(strings.nameEmpty)
                 is LoadState.Failed -> EmptyBlock(s.message)
-                is LoadState.Ready -> NameContent(s.data)
+                is LoadState.Ready -> NameContent(s.data, language, strings)
             }
-            Spacer(Modifier.height(30.dp))
+            Spacer(Modifier.height(28.dp))
         }
     }
 }
 
 @Composable
-private fun NameContent(report: com.premium.aboutyou.data.NameReport) {
-    val local = report.local ?: LocalNameData.generated(
+private fun NameContent(report: NameReport, language: Language, strings: Strings) {
+    val raw = report.local ?: LocalNameData.generated(
         report.query,
         genderHint = report.stats?.genderGuess,
         originHint = report.stats?.countries?.firstOrNull()?.first
     )
+    val local = raw.localized(language)
 
-    // ---- Hero: meaning ----
     GlassCard(accent = AppColors.Gold) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 modifier = Modifier
-                    .size(56.dp)
-                    .clip(CircleShape)
+                    .size(58.dp)
+                    .clip(RoundedCornerShape(18.dp))
                     .background(AppColors.Gold.copy(alpha = 0.16f)),
                 contentAlignment = Alignment.Center
             ) {
@@ -85,70 +93,78 @@ private fun NameContent(report: com.premium.aboutyou.data.NameReport) {
                 )
             }
             Spacer(Modifier.width(14.dp))
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 GradientText(text = report.query.replaceFirstChar { it.uppercase() })
-                Text("${local.gender} • ${local.origin}", color = AppColors.Muted, style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    "${local.gender} • ${local.origin}",
+                    color = AppColors.Muted,
+                    style = MaterialTheme.typography.bodyMedium
+                )
             }
         }
         Spacer(Modifier.height(16.dp))
-        Text("Meaning", color = AppColors.Gold, style = MaterialTheme.typography.labelLarge)
-        Spacer(Modifier.height(4.dp))
+        Text(strings.meaning, color = AppColors.Gold, style = MaterialTheme.typography.labelLarge)
+        Spacer(Modifier.height(5.dp))
         Text(local.meaning, color = AppColors.Text, style = MaterialTheme.typography.bodyLarge)
-        Spacer(Modifier.height(12.dp))
-        Text(local.urduMeaning, color = AppColors.GoldSoft, style = MaterialTheme.typography.bodyLarge)
+        if (local.secondaryMeaning.isNotBlank()) {
+            Spacer(Modifier.height(10.dp))
+            Text(local.secondaryMeaning, color = AppColors.GoldSoft, style = MaterialTheme.typography.bodyLarge)
+        }
         Spacer(Modifier.height(16.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Tag(local.culture, AppColors.Violet)
-            Tag("Lucky ${local.luckyNumber}", AppColors.Cyan)
+            Tag("${strings.luckyNumber}: ${local.luckyNumber}", AppColors.Cyan)
         }
     }
 
     Spacer(Modifier.height(14.dp))
 
-    // ---- Quick facts ----
     GlassCard {
-        SectionHeader(Icons.Filled.Badge, "Name Profile")
+        SectionHeader(Icons.Filled.Badge, strings.nameProfile)
         Spacer(Modifier.height(10.dp))
-        InfoRow("Origin", local.origin)
-        InfoRow("Culture", local.culture)
-        InfoRow("Gender", local.gender)
-        InfoRow("Lucky Number", local.luckyNumber)
-        InfoRow("Lucky Colour", local.luckyColor)
-        if (report.stats?.genderProbability != null) {
-            val confidence = (report.stats.genderProbability * 100).toInt()
-            InfoRow(
-                "Data Confidence",
-                "$confidence% match across millions of records"
-            )
+        InfoRow(strings.origin, local.origin)
+        InfoRow(strings.culture, local.culture)
+        InfoRow(strings.gender, local.gender)
+        InfoRow(strings.luckyNumber, local.luckyNumber)
+        InfoRow(strings.luckyColour, local.luckyColor)
+        report.stats?.genderProbability?.let { p ->
+            InfoRow(strings.confidence, "${(p * 100).toInt()}%")
         }
     }
 
-    // ---- Traits ----
     Spacer(Modifier.height(14.dp))
     GlassCard(accent = AppColors.Cyan) {
-        SectionHeader(Icons.Filled.Star, "Personality Traits")
+        SectionHeader(Icons.Filled.Star, strings.traits, accent = AppColors.Cyan)
         Spacer(Modifier.height(12.dp))
         FlowTags(local.traits)
     }
 
-    // ---- Live statistics ----
     report.stats?.let { st ->
         Spacer(Modifier.height(14.dp))
         GlassCard(accent = AppColors.Violet) {
-            SectionHeader(Icons.Filled.Public, "Live Name Statistics", "genderize.io and nationalize.io")
+            SectionHeader(Icons.Filled.Public, strings.liveStats, "genderize.io • nationalize.io", AppColors.Violet)
             Spacer(Modifier.height(12.dp))
             st.genderGuess?.let {
-                InfoRow("Mostly used as", "$it name")
+                InfoRow(strings.mostlyUsed, Dict.word(it, language))
             }
             if (st.countries.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))
-                Text("Most common in", color = AppColors.Muted, style = MaterialTheme.typography.bodyMedium)
+                Text(strings.mostCommonIn, color = AppColors.Muted, style = MaterialTheme.typography.bodyMedium)
                 Spacer(Modifier.height(8.dp))
                 st.countries.forEach { (country, p) ->
                     Column(modifier = Modifier.padding(vertical = 5.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(country, color = AppColors.Text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                            Text("${(p * 100).toInt()}%", color = AppColors.Gold, style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                country,
+                                color = AppColors.Text,
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                "${(p * 100).toInt()}%",
+                                color = AppColors.Gold,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
                         }
                         Spacer(Modifier.height(5.dp))
                         ProgressBar(p.toFloat(), AppColors.Violet)
@@ -158,11 +174,10 @@ private fun NameContent(report: com.premium.aboutyou.data.NameReport) {
         }
     }
 
-    // ---- Wikipedia summary ----
     report.summary?.let { sum ->
         Spacer(Modifier.height(14.dp))
         GlassCard(accent = AppColors.Gold) {
-            SectionHeader(Icons.Filled.School, "From the Encyclopaedia", sum.title)
+            SectionHeader(Icons.Filled.School, strings.encyclopaedia, sum.title)
             Spacer(Modifier.height(12.dp))
             if (!sum.imageUrl.isNullOrBlank()) {
                 AsyncImage(
@@ -180,13 +195,12 @@ private fun NameContent(report: com.premium.aboutyou.data.NameReport) {
         }
     }
 
-    // ---- Famous people with this name ----
     Spacer(Modifier.height(14.dp))
     GlassCard(accent = AppColors.Pink) {
-        SectionHeader(Icons.Filled.Celebration, "Famous People With This Name", "from Wikipedia")
+        SectionHeader(Icons.Filled.Celebration, strings.famousNames, accent = AppColors.Pink)
         Spacer(Modifier.height(12.dp))
         if (report.notable.isEmpty()) {
-            EmptyBlock("No well-known people were found for this exact name.")
+            EmptyBlock(strings.noneFound)
         } else {
             report.notable.forEachIndexed { i, p ->
                 NotableRow(p)
@@ -196,20 +210,43 @@ private fun NameContent(report: com.premium.aboutyou.data.NameReport) {
     }
 }
 
+/** Applies the chosen language to a curated entry. */
+private fun NameMeaning.localized(lang: Language) = LocalizedName(
+    meaning = meaning,
+    secondaryMeaning = if (lang == Language.URDU) urduMeaning else "",
+    origin = origin,
+    culture = Dict.word(culture, lang),
+    gender = Dict.word(gender, lang),
+    luckyNumber = luckyNumber,
+    luckyColor = luckyColor,
+    traits = traits.map { Dict.word(it, lang) }
+)
+
+private data class LocalizedName(
+    val meaning: String,
+    val secondaryMeaning: String,
+    val origin: String,
+    val culture: String,
+    val gender: String,
+    val luckyNumber: String,
+    val luckyColor: String,
+    val traits: List<String>
+)
+
 @Composable
 private fun NotableRow(p: com.premium.aboutyou.data.NotablePerson) {
     Row {
         RemoteImage(
             url = p.imageUrl,
             contentDescription = p.title,
-            modifier = Modifier.size(60.dp),
-            shape = RoundedCornerShape(14.dp)
+            modifier = Modifier.size(62.dp),
+            shape = RoundedCornerShape(16.dp)
         )
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(p.title, color = AppColors.Text, style = MaterialTheme.typography.titleMedium)
             if (p.extract.isNotBlank()) {
-                Spacer(Modifier.height(2.dp))
+                Spacer(Modifier.height(3.dp))
                 Text(
                     p.extract,
                     color = AppColors.Muted,
@@ -223,7 +260,6 @@ private fun NotableRow(p: com.premium.aboutyou.data.NotablePerson) {
 
 @Composable
 private fun FlowTags(tags: List<String>) {
-    // Simple wrapped rows: two per line keeps it tidy on phones.
     tags.chunked(2).forEach { row ->
         Row(
             modifier = Modifier
@@ -231,9 +267,7 @@ private fun FlowTags(tags: List<String>) {
                 .padding(vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            row.forEach { t ->
-                Tag(t, AppColors.Cyan)
-            }
+            row.forEach { t -> Tag(t, AppColors.Cyan) }
         }
     }
 }
