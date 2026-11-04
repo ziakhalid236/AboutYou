@@ -48,9 +48,11 @@ jobs:
 
       - name: Collect APKs
         run: |
+          VERSION=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts | head -1)
+          echo "App version: $VERSION"
           mkdir -p apk
-          cp app/build/outputs/apk/debug/app-debug.apk apk/AboutYou-1.0-debug.apk
-          cp app/build/outputs/apk/release/app-release.apk apk/AboutYou-1.0-release.apk
+          cp app/build/outputs/apk/debug/app-debug.apk "apk/AboutYou-$VERSION-debug.apk"
+          cp app/build/outputs/apk/release/app-release.apk "apk/AboutYou-$VERSION-release.apk"
           ls -la apk
 
       - name: Upload APK artifacts
